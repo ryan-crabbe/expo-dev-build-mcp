@@ -137,7 +137,27 @@ Claude will use the MCP tools automatically and can see/analyze the screenshots.
 
 ## Remote Access (via ngrok)
 
-Want to use Claude to control your iPhone from anywhere? Use HTTP mode with ngrok.
+The HTTP/ngrok mode lets you access an iPhone from a **different machine** than where it's physically connected.
+
+```
+┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐
+│  Claude Code    │ ──────► │  ngrok tunnel   │ ──────► │  Mac at Home    │ ──────► │  iPhone         │
+│  (your laptop)  │  HTTPS  │  (internet)     │  HTTP   │  (MCP server)   │  USB    │  (plugged in)   │
+└─────────────────┘         └─────────────────┘         └─────────────────┘         └─────────────────┘
+```
+
+**When to use this:**
+
+| Scenario | Example |
+|----------|---------|
+| **Two Macs** | Mac Mini at home with test iPhone. Access from MacBook anywhere. |
+| **Shared team device** | Office Mac with test device. Whole team can access remotely. |
+| **Cloud Mac** | MacStadium/AWS EC2 Mac with device. Access from anywhere. |
+| **CI/CD** | Automated testing from cloud runners against a physical device. |
+
+**When you DON'T need this:**
+
+If your iPhone and Mac are always together (typical solo dev setup), just use the default stdio mode - it's simpler and faster.
 
 ### Quick Start (Recommended)
 
