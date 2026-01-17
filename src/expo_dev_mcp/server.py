@@ -3,17 +3,21 @@ Expo Dev Build MCP Server
 
 An MCP server for interacting with iOS devices running Expo development builds.
 Provides tools for screenshots, logs, device info, and app management.
+
+Supports two transport modes:
+- stdio (default): For local Claude Desktop/Code integration
+- http: For remote access via ngrok tunnel
 """
 
+import argparse
 import asyncio
 import base64
-import io
 import json
+import os
+import secrets
 import subprocess
 import sys
 import tempfile
-import textwrap
-from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -27,8 +31,8 @@ from mcp.types import (
 )
 
 
-# Global state for log streaming
-_log_processes: dict[str, subprocess.Popen] = {}
+# Auth token for HTTP mode
+_auth_token: str | None = None
 
 
 def _run_pymobiledevice3_cmd(args: list[str], timeout: int = 30) -> tuple[bool, str]:
@@ -317,11 +321,6 @@ async def handle_screenshot(device_id: str | None) -> list[TextContent | ImageCo
         success, output = _run_pymobiledevice3_cmd(args, timeout=60)
 
         if not success:
-            # Try alternative method
-            args = ["lockdown", "screenshot", "--udid", udid, tmp_path]
-            success, output = _run_pymobiledevice3_cmd(args, timeout=60)
-
-        if not success:
             return [TextContent(
                 type="text",
                 text=f"Failed to take screenshot: {output}\n\nNote: Screenshots require Developer Mode to be enabled on iOS 16+ devices.",
@@ -502,8 +501,12 @@ async def handle_kill_app(bundle_id: str, device_id: str | None) -> list[TextCon
     return [TextContent(type="text", text=f"Killed {bundle_id}")]
 
 
-async def run_server():
-    """Run the MCP server."""
+# =============================================================================
+# Transport: stdio (default, for local use)
+# =============================================================================
+
+async def run_stdio_server():
+    """Run the MCP server with stdio transport (local use)."""
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
@@ -512,9 +515,176 @@ async def run_server():
         )
 
 
+# =============================================================================
+# Transport: HTTP with SSE (for remote use via ngrok)
+# =============================================================================
+
+def create_http_app(auth_token: str):
+    """Create a Starlette app for HTTP transport with auth."""
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.middleware.cors import CORSMiddleware
+    from starlette.requests import Request
+    from starlette.responses import JSONResponse, Response
+    from starlette.routing import Route
+    from mcp.server.sse import SseServerTransport
+
+    # Create SSE transport
+    sse = SseServerTransport("/messages/")
+
+    async def handle_sse(request: Request):
+        """Handle SSE connections for MCP."""
+        # Check auth
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return JSONResponse({"error": "Missing Bearer token"}, status_code=401)
+
+        token = auth_header[7:]  # Remove "Bearer " prefix
+        if token != auth_token:
+            return JSONResponse({"error": "Invalid token"}, status_code=403)
+
+        async with sse.connect_sse(
+            request.scope, request.receive, request._send
+        ) as streams:
+            await server.run(
+                streams[0],
+                streams[1],
+                server.create_initialization_options(),
+            )
+        return Response()
+
+    async def handle_messages(request: Request):
+        """Handle POST messages for MCP."""
+        # Check auth
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return JSONResponse({"error": "Missing Bearer token"}, status_code=401)
+
+        token = auth_header[7:]
+        if token != auth_token:
+            return JSONResponse({"error": "Invalid token"}, status_code=403)
+
+        await sse.handle_post_message(request.scope, request.receive, request._send)
+        return Response()
+
+    async def health_check(request: Request):
+        """Health check endpoint (no auth required)."""
+        return JSONResponse({
+            "status": "ok",
+            "server": "expo-dev-mcp",
+            "transport": "http+sse",
+        })
+
+    routes = [
+        Route("/health", health_check, methods=["GET"]),
+        Route("/sse", handle_sse, methods=["GET"]),
+        Route("/messages/", handle_messages, methods=["POST"]),
+    ]
+
+    middleware = [
+        Middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    ]
+
+    return Starlette(routes=routes, middleware=middleware)
+
+
+async def run_http_server(port: int, auth_token: str):
+    """Run the MCP server with HTTP transport."""
+    import uvicorn
+
+    app = create_http_app(auth_token)
+
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",
+        port=port,
+        log_level="warning",
+    )
+    server_instance = uvicorn.Server(config)
+    await server_instance.serve()
+
+
+# =============================================================================
+# Main entry point
+# =============================================================================
+
 def main():
-    """Main entry point."""
-    asyncio.run(run_server())
+    """Main entry point with CLI argument parsing."""
+    parser = argparse.ArgumentParser(
+        description="Expo Dev Build MCP Server",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run locally (stdio mode, default)
+  python -m expo_dev_mcp.server
+
+  # Run in HTTP mode for remote access
+  python -m expo_dev_mcp.server --http --port 8080
+
+  # Run with ngrok (in another terminal: ngrok http 8080)
+  python -m expo_dev_mcp.server --http --port 8080
+        """
+    )
+
+    parser.add_argument(
+        "--http",
+        action="store_true",
+        help="Run in HTTP mode instead of stdio (for remote access via ngrok)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8080,
+        help="Port for HTTP server (default: 8080)",
+    )
+    parser.add_argument(
+        "--token",
+        type=str,
+        default=None,
+        help="Auth token for HTTP mode (auto-generated if not provided)",
+    )
+
+    args = parser.parse_args()
+
+    if args.http:
+        # HTTP mode with auth
+        auth_token = args.token or secrets.token_urlsafe(32)
+
+        print("=" * 60, file=sys.stderr)
+        print("Expo Dev Build MCP Server (HTTP Mode)", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+        print(f"\nServer running on http://0.0.0.0:{args.port}", file=sys.stderr)
+        print(f"\nAuth Token: {auth_token}", file=sys.stderr)
+        print("\n" + "-" * 60, file=sys.stderr)
+        print("To expose via ngrok, run in another terminal:", file=sys.stderr)
+        print(f"  ngrok http {args.port}", file=sys.stderr)
+        print("\nThen configure Claude with the ngrok URL:", file=sys.stderr)
+        print("""
+{
+  "mcpServers": {
+    "expo-dev": {
+      "type": "sse",
+      "url": "https://YOUR-NGROK-URL/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN"
+      }
+    }
+  }
+}
+""", file=sys.stderr)
+        print("-" * 60, file=sys.stderr)
+        print(f"\nReplace YOUR_TOKEN with: {auth_token}", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+
+        asyncio.run(run_http_server(args.port, auth_token))
+    else:
+        # Default stdio mode
+        asyncio.run(run_stdio_server())
 
 
 if __name__ == "__main__":

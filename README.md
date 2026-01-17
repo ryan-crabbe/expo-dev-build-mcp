@@ -34,7 +34,7 @@ An MCP server that lets Claude see and interact with iOS devices running Expo de
 ### 2. Clone and Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/expo-dev-build-mcp.git
+git clone https://github.com/ryan-crabbe/expo-dev-build-mcp.git
 cd expo-dev-build-mcp
 
 # Create virtual environment with Python 3.10+
@@ -135,6 +135,71 @@ Once configured, ask Claude things like:
 
 Claude will use the MCP tools automatically and can see/analyze the screenshots.
 
+## Remote Access (via ngrok)
+
+Want to use Claude to control your iPhone from anywhere? Use HTTP mode with ngrok.
+
+### Quick Start (Recommended)
+
+```bash
+# Install ngrok if needed
+brew install ngrok
+ngrok config add-authtoken YOUR_NGROK_TOKEN  # Get from ngrok.com
+
+# Run the convenience script
+./start-remote.sh
+```
+
+This starts both the server and ngrok, then prints the Claude configuration.
+
+### Manual Setup
+
+**Terminal 1: Start tunneld (iOS 17+)**
+```bash
+cd expo-dev-build-mcp
+source .venv/bin/activate
+sudo python3 -m pymobiledevice3 remote tunneld
+```
+
+**Terminal 2: Start MCP server in HTTP mode**
+```bash
+cd expo-dev-build-mcp
+source .venv/bin/activate
+python -m expo_dev_mcp.server --http --port 8080
+```
+
+Note the auth token printed to the console.
+
+**Terminal 3: Start ngrok**
+```bash
+ngrok http 8080
+```
+
+Note the ngrok URL (e.g., `https://abc123.ngrok.io`).
+
+### Configure Claude for Remote Access
+
+```json
+{
+  "mcpServers": {
+    "expo-dev": {
+      "type": "sse",
+      "url": "https://YOUR-NGROK-URL/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_AUTH_TOKEN"
+      }
+    }
+  }
+}
+```
+
+### Security
+
+- **Random auth token** - Generated on each server start
+- **HTTPS** - ngrok provides TLS encryption
+- **Short-lived** - Tunnel only exists while server runs
+- **Random URL** - ngrok URLs are hard to guess
+
 ## Troubleshooting
 
 ### "No device found"
@@ -178,10 +243,11 @@ No jailbreak required. It uses the same protocols as Xcode.
 expo-dev-build-mcp/
 ├── pyproject.toml           # Package configuration
 ├── README.md                # This file
+├── start-remote.sh          # Convenience script for ngrok setup
 └── src/
     └── expo_dev_mcp/
         ├── __init__.py
-        └── server.py        # MCP server implementation
+        └── server.py        # MCP server (stdio + HTTP modes)
 ```
 
 ## Development
