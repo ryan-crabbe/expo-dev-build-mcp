@@ -135,91 +135,6 @@ Once configured, ask Claude things like:
 
 Claude will use the MCP tools automatically and can see/analyze the screenshots.
 
-## Remote Access (via ngrok)
-
-The HTTP/ngrok mode lets you access an iPhone from a **different machine** than where it's physically connected.
-
-```
-┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐         ┌─────────────────┐
-│  Claude Code    │ ──────► │  ngrok tunnel   │ ──────► │  Mac at Home    │ ──────► │  iPhone         │
-│  (your laptop)  │  HTTPS  │  (internet)     │  HTTP   │  (MCP server)   │  USB    │  (plugged in)   │
-└─────────────────┘         └─────────────────┘         └─────────────────┘         └─────────────────┘
-```
-
-**When to use this:**
-
-| Scenario | Example |
-|----------|---------|
-| **Two Macs** | Mac Mini at home with test iPhone. Access from MacBook anywhere. |
-| **Shared team device** | Office Mac with test device. Whole team can access remotely. |
-| **Cloud Mac** | MacStadium/AWS EC2 Mac with device. Access from anywhere. |
-| **CI/CD** | Automated testing from cloud runners against a physical device. |
-
-**When you DON'T need this:**
-
-If your iPhone and Mac are always together (typical solo dev setup), just use the default stdio mode - it's simpler and faster.
-
-### Quick Start (Recommended)
-
-```bash
-# Install ngrok if needed
-brew install ngrok
-ngrok config add-authtoken YOUR_NGROK_TOKEN  # Get from ngrok.com
-
-# Run the convenience script
-./start-remote.sh
-```
-
-This starts both the server and ngrok, then prints the Claude configuration.
-
-### Manual Setup
-
-**Terminal 1: Start tunneld (iOS 17+)**
-```bash
-cd expo-dev-build-mcp
-source .venv/bin/activate
-sudo python3 -m pymobiledevice3 remote tunneld
-```
-
-**Terminal 2: Start MCP server in HTTP mode**
-```bash
-cd expo-dev-build-mcp
-source .venv/bin/activate
-python -m expo_dev_mcp.server --http --port 8080
-```
-
-Note the auth token printed to the console.
-
-**Terminal 3: Start ngrok**
-```bash
-ngrok http 8080
-```
-
-Note the ngrok URL (e.g., `https://abc123.ngrok.io`).
-
-### Configure Claude for Remote Access
-
-```json
-{
-  "mcpServers": {
-    "expo-dev": {
-      "type": "sse",
-      "url": "https://YOUR-NGROK-URL/sse",
-      "headers": {
-        "Authorization": "Bearer YOUR_AUTH_TOKEN"
-      }
-    }
-  }
-}
-```
-
-### Security
-
-- **Random auth token** - Generated on each server start
-- **HTTPS** - ngrok provides TLS encryption
-- **Short-lived** - Tunnel only exists while server runs
-- **Random URL** - ngrok URLs are hard to guess
-
 ## Troubleshooting
 
 ### "No device found"
@@ -263,11 +178,10 @@ No jailbreak required. It uses the same protocols as Xcode.
 expo-dev-build-mcp/
 ├── pyproject.toml           # Package configuration
 ├── README.md                # This file
-├── start-remote.sh          # Convenience script for ngrok setup
 └── src/
     └── expo_dev_mcp/
         ├── __init__.py
-        └── server.py        # MCP server (stdio + HTTP modes)
+        └── server.py        # MCP server implementation
 ```
 
 ## Development
@@ -283,14 +197,12 @@ python -m expo_dev_mcp.server
 npx @modelcontextprotocol/inspector python -m expo_dev_mcp.server
 ```
 
-## Future: Gesture Support (Phase 2)
+## Future: Gesture Support
 
-This MVP is view-only. Phase 2 would add tap/swipe gestures via WebDriverAgent, requiring:
+This is currently view-only. Adding tap/swipe gestures would require WebDriverAgent, which needs:
 - Apple Developer account (paid)
 - Code signing and provisioning profiles
 - WebDriverAgent installed on device
-
-See the project research notes for implementation details.
 
 ## License
 
