@@ -1,0 +1,24 @@
+[project]
+name = "expo-dev-mcp"
+version = "0.1.0"
+description = "MCP server for Expo development builds - screenshots, logs, and device control"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "mcp>=1.0.0",
+    "pymobiledevice3>=4.0.0",
+    "pillow>=10.0.0",
+]
+
+[project.scripts]
+expo-dev-mcp = "expo_dev_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/expo_dev_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/expo_dev_mcp"]
