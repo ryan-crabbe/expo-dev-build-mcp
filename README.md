@@ -1,6 +1,7 @@
 # Expo Dev Build MCP Server
 
-An MCP server that lets Claude see and interact with iOS devices running Expo development builds. Take screenshots, view logs, launch apps, and debug your mobile app through conversation.
+An MCP server that lets Claude see and interact with iOS devices running Expo development builds. Take screenshots, view logs, launch apps, and debug your mobile app through conversation. This was vibe coded please use at your own risk
+its not exaxtly what i want just yet but still WIP.
 
 ## What It Does
 
